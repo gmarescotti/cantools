@@ -350,7 +350,8 @@ class DbcSpecifics(object):
                  attributes=None,
                  attribute_definitions=None,
                  environment_variables=None,
-                 value_tables=None):
+                 value_tables=None,
+                 comments=None):
         if attributes is None:
             attributes = odict()
 
@@ -367,6 +368,8 @@ class DbcSpecifics(object):
         self._attribute_definitions = attribute_definitions
         self._environment_variables = environment_variables
         self._value_tables = value_tables
+        self._comment = comments
+        
 
     @property
     def attributes(self):
@@ -1729,7 +1732,8 @@ def load_string(string, strict=True):
     dbc_specifics = DbcSpecifics(attributes.get('database', None),
                                  attribute_definitions,
                                  environment_variables,
-                                 value_tables)
+                                 value_tables,
+                                 comments.get("database", "TODO"))
 
     return InternalDatabase(messages,
                             nodes,
