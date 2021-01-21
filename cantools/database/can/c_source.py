@@ -12,7 +12,7 @@ try:
 except:
     def pretty_number(x, u):
         if x is None: return "NA"
-        return x + u
+        return "%s%s" % (x, u)
 
 RST_HEADER_FMT = '''\
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
