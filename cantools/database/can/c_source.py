@@ -2403,20 +2403,33 @@ def generate_qt(database,
     # Attach to message the node property
     for msg in messages:
         msg.node = next(n for n in database.nodes if n.name == next(iter(msg._senders or []), None))
+    
+    if signals.strip() == "":
+        signals = "all"
 
-    for signal in signals.split(","):
-        if signal == '': continue
-        for msg in messages:
-            signal_qt = msg.get_signal_by_name(signal)
-            if signal_qt:
-                if not getattr(msg, "used_signals", False): msg.used_signals = set()
-                msg.used_signals.add(signal_qt)
-                signal_qt.message = msg
-                signals_qt.add(signal_qt)
-                messages_qt.add(msg)
-                break
-        else:
-            raise(Exception("unknown signal %s" % signal))
+    if signals == "all":
+        def iterate_managed_signals():
+            for msg in messages:
+                for sig in msg.signals:
+                    yield sig
+    else:
+        def iterate_managed_signals():
+            for signal in signals.split(","):
+                if signal == '': continue
+                for msg in messages:
+                    signal_qt = msg.get_signal_by_name(signal)
+                    if signal_qt:
+                        yield signal_qt
+                        break
+                else:
+                    raise(Exception("unknown signal %s" % signal))
+
+    for signal_qt in iterate_managed_signals():
+        if not getattr(msg, "used_signals", False): msg.used_signals = set()
+        msg.used_signals.add(signal_qt)
+        signal_qt.message = msg
+        signals_qt.add(signal_qt)
+        messages_qt.add(msg)
 
     include_guard = '{}_QT_H'.format(database_name.upper())
 
