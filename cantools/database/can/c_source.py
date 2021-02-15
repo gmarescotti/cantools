@@ -99,6 +99,7 @@ h2. Modulo {node_name}
 '''
 
 REDMINE_SIGNAL_FMT = '''\
+
 h3. {signal_name}
 
 {signal_description}'''
