@@ -492,7 +492,7 @@ void {database_name}QtMessage::send_frame(QByteArray payload, bool is_extended) 
 
     frame.setExtendedFrameFormat(is_extended);
     frame.setFlexibleDataRateFormat(false);
-    frame.setBitrateSwitch(false);
+    // frame.setBitrateSwitch(false);
     frame.setFrameType({entity_frame_type}::DataFrame);
 
     // qDebug() << "Emit send frame " << frame.toString();
