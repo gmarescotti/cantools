@@ -3,7 +3,9 @@ import os
 import os.path
 
 from .. import database
-from ..database.can.c_source import generate_qt, generate, generate_rst, generate_redmine
+from ..database.can.c_source import generate
+from ..database.can.doc_source import  generate_rst, generate_redmine
+from ..database.can.qt_source import generate_qt
 from ..database.can.c_source import camel_to_snake_case
 
 
@@ -112,7 +114,8 @@ def _do_generate_c_source(args):
         filename_c,
         fuzzer_filename_c,
         not args.no_floating_point_numbers,
-        args.bit_fields)
+        args.bit_fields,
+        no_range_check=args.no_range_check)
 
     os.makedirs(args.output_directory, exist_ok=True)
     
@@ -172,6 +175,10 @@ def add_subparser(subparsers):
         '--no-strict',
         action='store_true',
         help='Skip database consistency checks.')
+    generate_c_source_parser.add_argument(
+        '--no-range-check',
+        action='store_true',
+        help='Skip range checks.')
     generate_c_source_parser.add_argument(
         '-f', '--generate-fuzzer',
         action='store_true',
