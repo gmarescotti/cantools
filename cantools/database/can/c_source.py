@@ -4,7 +4,6 @@ from decimal import Decimal
 
 from ...version import __version__
 
-
 HEADER_FMT = '''\
 /**
  * The MIT License (MIT)
@@ -545,7 +544,7 @@ class Signal(object):
 
     @property
     def unit(self):
-        return _get(self._signal.unit, '-')
+        return _get(self._signal.unit, '')
 
     @property
     def type_length(self):
@@ -747,7 +746,7 @@ class Message(object):
 
     def get_signal_by_name(self, name):
         for signal in self.signals:
-            if signal.name == name:
+            if signal.name.lower() == name.lower():
                 return signal
 
 
@@ -1042,6 +1041,9 @@ def _format_unpack_code_signal(message,
         else:
             fmt = '    dst_p->{} {} unpack_{}_shift_u{}(src_p[{}], {}u, 0x{:02x}u);'
 
+        if signal.is_float:
+            index = {0:2,1:3,2:0,3:1}[index]
+            
         line = fmt.format(signal.snake_name,
                           '=' if i == 0 else '|=',
                           shift_direction,
@@ -1340,7 +1342,7 @@ def _generate_structs(database_name, messages, bit_fields):
     return '\n'.join(structs)
 
 
-def _generate_declarations(database_name, messages, floating_point_numbers):
+def _generate_declarations(database_name, messages, floating_point_numbers, no_range_check=False):
     declarations = []
 
     for message in messages:
@@ -1356,11 +1358,12 @@ def _generate_declarations(database_name, messages, floating_point_numbers):
                     signal_name=signal.snake_name,
                     type_name=signal.type_name)
 
-            signal_declaration += SIGNAL_DECLARATION_IS_IN_RANGE_FMT.format(
-                database_name=database_name,
-                message_name=message.snake_name,
-                signal_name=signal.snake_name,
-                type_name=signal.type_name)
+            if not no_range_check:
+                signal_declaration += SIGNAL_DECLARATION_IS_IN_RANGE_FMT.format(
+                    database_name=database_name,
+                    message_name=message.snake_name,
+                    signal_name=signal.snake_name,
+                    type_name=signal.type_name)
 
             signal_declarations.append(signal_declaration)
 
@@ -1376,7 +1379,7 @@ def _generate_declarations(database_name, messages, floating_point_numbers):
     return '\n'.join(declarations)
 
 
-def _generate_definitions(database_name, messages, floating_point_numbers):
+def _generate_definitions(database_name, messages, floating_point_numbers, no_range_check=False):
     definitions = []
     pack_helper_kinds = set()
     unpack_helper_kinds = set()
@@ -1403,13 +1406,14 @@ def _generate_definitions(database_name, messages, floating_point_numbers):
                     encode=encode,
                     decode=decode)
 
-            signal_definition += SIGNAL_DEFINITION_IS_IN_RANGE_FMT.format(
-                database_name=database_name,
-                message_name=message.snake_name,
-                signal_name=signal.snake_name,
-                type_name=signal.type_name,
-                unused=unused,
-                check=check)
+            if not no_range_check:
+                signal_definition += SIGNAL_DEFINITION_IS_IN_RANGE_FMT.format(
+                    database_name=database_name,
+                    message_name=message.snake_name,
+                    signal_name=signal.snake_name,
+                    type_name=signal.type_name,
+                    unused=unused,
+                    check=check)
 
             signal_definitions.append(signal_definition)
 
@@ -1520,7 +1524,8 @@ def generate(database,
              source_name,
              fuzzer_source_name,
              floating_point_numbers=True,
-             bit_fields=False):
+             bit_fields=False,
+             no_range_check=False):
     """Generate C source code from given CAN database `database`.
 
     `database_name` is used as a prefix for all defines, data
@@ -1561,10 +1566,12 @@ def generate(database,
     structs = _generate_structs(database_name, messages, bit_fields)
     declarations = _generate_declarations(database_name,
                                           messages,
-                                          floating_point_numbers)
+                                          floating_point_numbers,
+                                          no_range_check)
     definitions, helper_kinds = _generate_definitions(database_name,
                                                       messages,
-                                                      floating_point_numbers)
+                                                      floating_point_numbers,
+                                                      no_range_check)
     helpers = _generate_helpers(helper_kinds)
 
     header = HEADER_FMT.format(version=__version__,
