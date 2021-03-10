@@ -398,7 +398,7 @@ SIGNAL_DECLARATION_ENCODE_DECODE_FMT = '''\
  *
  * @return Encoded signal.
  */
-{type_name} {database_name}_{message_name}_{signal_name}_encode(double value);
+{type_name} {database_name}_{message_name}_{signal_name}_encode({double_type} value);
 
 /**
  * Decode given signal by applying scaling and offset.
@@ -407,7 +407,7 @@ SIGNAL_DECLARATION_ENCODE_DECODE_FMT = '''\
  *
  * @return Decoded signal.
  */
-double {database_name}_{message_name}_{signal_name}_decode({type_name} value);
+{double_type} {database_name}_{message_name}_{signal_name}_decode({type_name} value);
 
 '''
 
@@ -517,12 +517,12 @@ int {database_name}_{message_name}_unpack(
 '''
 
 SIGNAL_DEFINITION_ENCODE_DECODE_FMT = '''\
-{type_name} {database_name}_{message_name}_{signal_name}_encode(double value)
+{type_name} {database_name}_{message_name}_{signal_name}_encode({double_type} value)
 {{
     return ({type_name})({encode});
 }}
 
-double {database_name}_{message_name}_{signal_name}_decode({type_name} value)
+{double_type} {database_name}_{message_name}_{signal_name}_decode({type_name} value)
 {{
     return ({decode});
 }}
@@ -577,7 +577,7 @@ SIGNAL_MEMBER_FMT = '''\
      * Scale: {scale}
      * Offset: {offset}
      */
-    {type_name} {name}{length};\
+    {real_type_name} {name}{length};\
 '''
 
 
@@ -617,6 +617,20 @@ class Signal(object):
 
             if not self.is_signed:
                 type_name = 'u' + type_name
+
+        return type_name
+
+    # compute type name for struct elements..
+    # it IS different for as_float types (scale < 1)
+    @property
+    def real_type_name(self):
+        if self.as_float:
+            if self.length <= 32:
+                type_name = 'float'
+            else:
+                type_name = 'double'
+        else:
+            type_name = self.type_name
 
         return type_name
 
@@ -718,7 +732,7 @@ class Signal(object):
 
     @property
     def minimum_value(self):
-        if self.is_float:
+        if self.is_float or self.as_float:
             return None
         elif self.is_signed:
             return -(2 ** (self.length - 1))
@@ -727,7 +741,7 @@ class Signal(object):
 
     @property
     def maximum_value(self):
-        if self.is_float:
+        if self.is_float or self.as_float:
             return None
         elif self.is_signed:
             return ((2 ** (self.length - 1)) - 1)
@@ -784,8 +798,9 @@ class Signal(object):
 
 class Message(object):
 
-    def __init__(self, message):
+    def __init__(self, message, parent=None):
         self._message = message
+        self.parent = parent
         self.snake_name = camel_to_snake_case(self.name)
         self.signals = [Signal(signal)for signal in message.signals]
 
@@ -850,11 +865,11 @@ def _format_decimal(value, is_float=False):
         value = int(value)
 
         if is_float:
-            return str(value) + '.0'
+            return str(value) + '.0f'
         else:
             return str(value)
     else:
-        return str(value)
+        return str(value) + "f"
 
 
 def _format_range(signal):
@@ -890,7 +905,7 @@ def _generate_signal(signal, bit_fields):
     scale = _get(signal.scale, '-')
     offset = _get(signal.offset, '-')
 
-    if signal.is_float or not bit_fields:
+    if signal.is_float or signal.as_float or not bit_fields:
         length = ''
     else:
         length = ' : {}'.format(signal.length)
@@ -899,7 +914,7 @@ def _generate_signal(signal, bit_fields):
                                       range=range_,
                                       scale=scale,
                                       offset=offset,
-                                      type_name=signal.type_name,
+                                      real_type_name=signal.real_type_name,
                                       name=signal.snake_name,
                                       length=length)
 
@@ -954,13 +969,15 @@ def _format_pack_code_signal(message,
                              helper_kinds):
     signal = message.get_signal_by_name(signal_name)
 
-    if signal.is_float or signal.is_signed:
+    if signal.is_float or signal.as_float or signal.is_signed:
         variable = '    uint{}_t {};'.format(signal.type_length,
                                              signal.snake_name)
 
         if signal.is_float:
             conversion = '    memcpy(&{0}, &src_p->{0}, sizeof({0}));'.format(
                 signal.snake_name)
+        elif signal.as_float:
+            conversion = f'    {signal.snake_name} = (uint{signal.type_length}_t){message.parent}_{message.snake_name}_{signal.snake_name}_encode(src_p->{signal.snake_name});'
         else:
             conversion = '    {0} = (uint{1}_t)src_p->{0};'.format(
                 signal.snake_name,
@@ -970,7 +987,7 @@ def _format_pack_code_signal(message,
         body_lines.append(conversion)
 
     for index, shift, shift_direction, mask in signal.segments(invert_shift=False):
-        if signal.is_float or signal.is_signed:
+        if signal.is_float or signal.as_float or signal.is_signed:
             fmt = '    dst_p[{}] |= pack_{}_shift_u{}({}, {}u, 0x{:02x}u);'
         else:
             fmt = '    dst_p[{}] |= pack_{}_shift_u{}(src_p->{}, {}u, 0x{:02x}u);'
@@ -1077,14 +1094,14 @@ def _format_unpack_code_signal(message,
     signal = message.get_signal_by_name(signal_name)
     conversion_type_name = 'uint{}_t'.format(signal.type_length)
 
-    if signal.is_float or signal.is_signed:
+    if signal.is_float or signal.as_float or signal.is_signed:
         variable = '    {} {};'.format(conversion_type_name, signal.snake_name)
         variable_lines.append(variable)
 
     segments = signal.segments(invert_shift=True)
 
     for i, (index, shift, shift_direction, mask) in enumerate(segments):
-        if signal.is_float or signal.is_signed:
+        if signal.is_float or signal.as_float or signal.is_signed:
             fmt = '    {} {} unpack_{}_shift_u{}(src_p[{}], {}u, 0x{:02x}u);'
         else:
             fmt = '    dst_p->{} {} unpack_{}_shift_u{}(src_p[{}], {}u, 0x{:02x}u);'
@@ -1105,6 +1122,10 @@ def _format_unpack_code_signal(message,
     if signal.is_float:
         conversion = '    memcpy(&dst_p->{0}, &{0}, sizeof(dst_p->{0}));'.format(
             signal.snake_name)
+        body_lines.append(conversion)
+    elif signal.as_float:
+        # suncharger_hmi0150_debug150_vfase_ref_encode
+        conversion = f'    dst_p->{signal.snake_name} = {message.parent}_{message.snake_name}_{signal.snake_name}_decode(({signal.type_name}){signal.snake_name});'
         body_lines.append(conversion)
     elif signal.is_signed:
         mask = ((1 << (signal.type_length - signal.length)) - 1)
@@ -1218,7 +1239,7 @@ def _format_choices(signal, signal_name):
     return choices
 
 
-def _generate_encode_decode(message):
+def _generate_encode_decode(message, args):
     encode_decode = []
 
     for signal in message.signals:
@@ -1229,18 +1250,18 @@ def _generate_encode_decode(message):
 
         if offset == 0 and scale == 1:
             encoding = 'value'
-            decoding = '(double)value'
+            decoding = f'({args.double_type})value'
         elif offset != 0 and scale != 1:
             encoding = '(value - {}) / {}'.format(formatted_offset,
                                                   formatted_scale)
-            decoding = '((double)value * {}) + {}'.format(formatted_scale,
+            decoding = f'(({args.double_type})value * {{}}) + {{}}'.format(formatted_scale,
                                                           formatted_offset)
         elif offset != 0:
             encoding = 'value - {}'.format(formatted_offset)
-            decoding = '(double)value + {}'.format(formatted_offset)
+            decoding = f'({args.double_type})value + {{}}'.format(formatted_offset)
         else:
             encoding = 'value / {}'.format(formatted_scale)
-            decoding = '(double)value * {}'.format(formatted_scale)
+            decoding = f'({args.double_type})value * {{}}'.format(formatted_scale)
 
         encode_decode.append((encoding, decoding))
 
@@ -1390,7 +1411,7 @@ def _generate_structs(database_name, messages, bit_fields):
     return '\n'.join(structs)
 
 
-def _generate_declarations(database_name, messages, floating_point_numbers, no_range_check, no_size_and_memset):
+def _generate_declarations(database_name, messages, args):
     declarations = []
 
     for message in messages:
@@ -1399,14 +1420,15 @@ def _generate_declarations(database_name, messages, floating_point_numbers, no_r
         for signal in message.signals:
             signal_declaration = ''
 
-            if floating_point_numbers:
+            if not args.no_floating_point_numbers:
                 signal_declaration = SIGNAL_DECLARATION_ENCODE_DECODE_FMT.format(
                     database_name=database_name,
                     message_name=message.snake_name,
                     signal_name=signal.snake_name,
-                    type_name=signal.type_name)
+                    type_name=signal.type_name,
+                    double_type=args.double_type)
 
-            if not no_range_check:
+            if not args.no_range_check:
                 signal_declaration += SIGNAL_DECLARATION_IS_IN_RANGE_FMT.format(
                     database_name=database_name,
                     message_name=message.snake_name,
@@ -1415,7 +1437,7 @@ def _generate_declarations(database_name, messages, floating_point_numbers, no_r
 
             signal_declarations.append(signal_declaration)
         
-        MY_DECLARATION_FMT = DECLARATION_FMT_WITHOUT_SIZE if no_size_and_memset else DECLARATION_FMT
+        MY_DECLARATION_FMT = DECLARATION_FMT_WITHOUT_SIZE if args.no_size_and_memset else DECLARATION_FMT
 
         declaration = MY_DECLARATION_FMT.format(database_name=database_name,
                                              database_message_name=message.name,
@@ -1429,7 +1451,7 @@ def _generate_declarations(database_name, messages, floating_point_numbers, no_r
     return '\n'.join(declarations)
 
 
-def _generate_definitions(database_name, messages, floating_point_numbers, no_range_check, no_size_and_memset):
+def _generate_definitions(database_name, messages, args):
     definitions = []
     pack_helper_kinds = set()
     unpack_helper_kinds = set()
@@ -1438,7 +1460,7 @@ def _generate_definitions(database_name, messages, floating_point_numbers, no_ra
         signal_definitions = []
 
         for signal, (encode, decode), check in zip(message.signals,
-                                                   _generate_encode_decode(message),
+                                                   _generate_encode_decode(message, args),
                                                    _generate_is_in_range(message)):
             if check == 'true':
                 unused = '    (void)value;\n\n'
@@ -1447,16 +1469,17 @@ def _generate_definitions(database_name, messages, floating_point_numbers, no_ra
 
             signal_definition = ''
 
-            if floating_point_numbers:
+            if not args.no_floating_point_numbers:
                 signal_definition = SIGNAL_DEFINITION_ENCODE_DECODE_FMT.format(
                     database_name=database_name,
                     message_name=message.snake_name,
                     signal_name=signal.snake_name,
                     type_name=signal.type_name,
                     encode=encode,
-                    decode=decode)
+                    decode=decode,
+                    double_type=args.double_type)
 
-            if not no_range_check:
+            if not args.no_range_check:
                 signal_definition += SIGNAL_DEFINITION_IS_IN_RANGE_FMT.format(
                     database_name=database_name,
                     message_name=message.snake_name,
@@ -1482,13 +1505,13 @@ def _generate_definitions(database_name, messages, floating_point_numbers, no_ra
                 unpack_unused += '    (void)dst_p;\n'
                 unpack_unused += '    (void)src_p;\n\n'
                 
-            if not no_size_and_memset:
+            if not args.no_size_and_memset:
                 pack_check_size_and_memset = f"    if (size < {message.length}) return (-EINVAL);\n\n    memset(&dst_p[0], 0, {message.length});\n"
             else:
                 pack_check_size_and_memset = ""
                 
             
-            MY_DEFINITION_FMT = DEFINITION_FMT_WITHOUT_SIZE if no_size_and_memset else DEFINITION_FMT
+            MY_DEFINITION_FMT = DEFINITION_FMT_WITHOUT_SIZE if args.no_size_and_memset else DEFINITION_FMT
 
             definition = MY_DEFINITION_FMT.format(database_name=database_name,
                                                database_message_name=message.name,
@@ -1581,10 +1604,7 @@ def generate(database,
              header_name,
              source_name,
              fuzzer_source_name,
-             floating_point_numbers=True,
-             bit_fields=False,
-             no_range_check=False,
-             no_size_and_memset=False):
+             args):
     """Generate C source code from given CAN database `database`.
 
     `database_name` is used as a prefix for all defines, data
@@ -1599,7 +1619,7 @@ def generate(database,
     `fuzzer_source_name` is the file name of the C source file, which
     is needed by the fuzzer makefile.
 
-    Set `floating_point_numbers` to ``True`` to allow floating point
+    Set `no_floating_point_numbers` to ``False`` to allow floating point
     numbers in the generated code.
 
     Set `bit_fields` to ``True`` to generate bit fields in structs.
@@ -1610,7 +1630,7 @@ def generate(database,
     """
 
     date = time.ctime()
-    messages = [Message(message) for message in database.messages]
+    messages = [Message(message, database_name) for message in database.messages]
     include_guard = '{}_H'.format(database_name.upper())
     frame_id_defines = _generate_frame_id_defines(database_name, messages)
     frame_length_defines = _generate_frame_length_defines(database_name,
@@ -1622,19 +1642,15 @@ def generate(database,
         database_name,
         messages)
     choices_defines = _generate_choices_defines(database_name, messages)
-    structs = _generate_structs(database_name, messages, bit_fields)
+    structs = _generate_structs(database_name, messages, args.bit_fields)
     
     declarations = _generate_declarations(database_name,
                                           messages,
-                                          floating_point_numbers,
-                                          no_range_check,
-                                          no_size_and_memset)
+                                          args)
     
     definitions, helper_kinds = _generate_definitions(database_name,
                                                       messages,
-                                                      floating_point_numbers,
-                                                      no_range_check, 
-                                                      no_size_and_memset)
+                                                      args)
     helpers = _generate_helpers(helper_kinds)
 
     header = HEADER_FMT.format(version=__version__,

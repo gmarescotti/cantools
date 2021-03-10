@@ -158,6 +158,8 @@ class Signal(object):
         self._multiplexer_ids = multiplexer_ids
         self._multiplexer_signal = multiplexer_signal
         self._is_float = is_float
+        # add as_float to treat number with scale != 1 as float
+        self.as_float = (scale < 1) and (not is_float)
         self._spn = spn
 
     @property

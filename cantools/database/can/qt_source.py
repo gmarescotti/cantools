@@ -200,8 +200,7 @@ public:
 
 QT_SIGNALS_SEND_METHODS_FMT = '''\
 void QVariantSignal_{signal_name}::send(QVariant x) {{
-    m_val = x;
-    static_cast<{database_name}QtMessage_{message_name}*>(parent)->store.{signal_name} = {database_name}_{message_name}_{signal_name}_encode(x.toDouble());
+    static_cast<{database_name}QtMessage_{message_name}*>(parent)->store.{signal_name} = static_cast<{type_name}>(x.{variant_cast}());
     uint8_t dst_p[{message_length}];
     {database_name}_{message_name}_pack(dst_p, &(static_cast<{database_name}QtMessage_{message_name}*>(parent))->store{message_length_parameter});
     parent->send_frame(QByteArray(reinterpret_cast<char*>(dst_p), {message_length}), {message_is_extended});
@@ -211,7 +210,6 @@ void QVariantSignal_{signal_name}::send(QVariant x) {{
 QT_SIGNALS_RECEIVED_CODE_FMT = '''\
         x = {database_name}_{message_name}_{signal_name}_decode(store.{signal_name});
         if (signals_store.m_{signal_name}->m_val != x) {{
-            signals_store.m_{signal_name}->m_val = x;
             emit signals_store.m_{signal_name}->on_change(QDateTime::fromMSecsSinceEpoch(m_timestamp));
             qDebug() << hex << "m_{signal_name}=" << signals_store.m_{signal_name}->m_val;
         }}
@@ -453,6 +451,8 @@ def _generate_qt_definitions(database_name, signals, args):
             message_length_parameter="" if args.no_size_and_memset else f", {signal.message.length}",
             message_length=signal.message.length,
             message_is_extended=str(signal.message.is_extended_frame).lower(),
+            variant_cast="toFloat" if signal.as_float or signal.is_float else "toInt" if signal._minimum < 0 else "toUInt",
+            type_name=signal.type_name
             ))
     
     return '\n    '.join(signals_instantiations), '\n'.join(signals_send_methods)

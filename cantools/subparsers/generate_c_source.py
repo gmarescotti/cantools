@@ -113,10 +113,7 @@ def _do_generate_c_source(args):
         filename_h,
         filename_c,
         fuzzer_filename_c,
-        not args.no_floating_point_numbers,
-        args.bit_fields,
-        no_range_check=args.no_range_check,
-        no_size_and_memset=args.no_size_and_memset)
+        args)
 
     os.makedirs(args.output_directory, exist_ok=True)
     
@@ -188,6 +185,10 @@ def add_subparser(subparsers):
         '-f', '--generate-fuzzer',
         action='store_true',
         help='Also generate fuzzer source code.')
+    generate_c_source_parser.add_argument(
+        '--double-type',
+        default='float',
+        help='Type to use as floating point, float or double (default is float).')
     generate_c_source_parser.add_argument(
         '-o', '--output-directory',
         default='.',
