@@ -203,7 +203,7 @@ void QVariantSignal_{signal_name}::send(QVariant x) {{
     m_val = x;
     static_cast<{database_name}QtMessage_{message_name}*>(parent)->store.{signal_name} = {database_name}_{message_name}_{signal_name}_encode(x.toDouble());
     uint8_t dst_p[{message_length}];
-    {database_name}_{message_name}_pack(dst_p, &(static_cast<{database_name}QtMessage_{message_name}*>(parent))->store, {message_length});
+    {database_name}_{message_name}_pack(dst_p, &(static_cast<{database_name}QtMessage_{message_name}*>(parent))->store{message_length_parameter});
     parent->send_frame(QByteArray(reinterpret_cast<char*>(dst_p), {message_length}), {message_is_extended});
 }}
 '''
@@ -238,8 +238,7 @@ class {database_name}QtMessage_{message_name} : public {database_name}QtMessage
 
         {database_name}_{message_name}_unpack(
                     &store,
-                    {frame_payload_function},
-                    static_cast<size_t>({frame_length_function2})
+                    {frame_payload_function}{frame_length_parameter}
                     );
 
 {signals_received_code}
@@ -319,7 +318,7 @@ void {database_name}QtMessage::send_frame(QByteArray payload, bool is_extended) 
 	messages_instantations
         messages_check_validity
 """
-def _generate_qt_declarations(database_name, messages, signals, for_modbus):
+def _generate_qt_declarations(database_name, messages, signals, args):
 
     signals_classes_declarations = list()
     signals_properties = list()
@@ -345,22 +344,37 @@ def _generate_qt_declarations(database_name, messages, signals, for_modbus):
     	        signal_name=signal.snake_name
     	    ))
             
-        frame_payload_function="reinterpret_cast<unsigned char*>(%s)" % ("frame.result().values().data()" if for_modbus else "frame.payload().data()")
-
-        s = QT_MESSAGES_CLASSES_DECLARATIONS_FMT.format(
-            database_name=database_name,
-            message_name=message.snake_name,
-            message_id=hex(message.frame_id),
-            message_is_extended=str(message.is_extended_frame).lower(),
-            message_length=message.length,
-            signals_received_code='\n'.join(signals_received_code),
-            entity_frame_type="QModbusReply" if for_modbus else "QCanBusFrame",
-            frame_length_function="frame.result().valueCount() * 2" if for_modbus else "frame.payload().length()",
-            frame_length_function2="frame.result().valueCount() * 2" if for_modbus else "frame.payload().length()",
-            frame_payload_function=frame_payload_function,
-            frame_timestamp_function="QDateTime::currentMSecsSinceEpoch();" if for_modbus else "((frame.timeStamp().seconds() * 1000) + (frame.timeStamp().microSeconds() / 1000));",
-            frame_is_extended="true" if for_modbus else "frame.hasExtendedFrameFormat()"
-            )
+        if args.for_modbus:
+            s = QT_MESSAGES_CLASSES_DECLARATIONS_FMT.format(
+                database_name=database_name,
+                message_name=message.snake_name,
+                message_id=hex(message.frame_id),
+                message_is_extended=str(message.is_extended_frame).lower(),
+                message_length=message.length,
+                signals_received_code='\n'.join(signals_received_code),
+                entity_frame_type="QModbusReply",
+                frame_length_function="frame.result().valueCount() * 2",
+                frame_length_parameter="" if args.no_size_and_memset else ",\n                    static_cast<size_t>(frame.result().valueCount() * 2)",
+                frame_payload_function="reinterpret_cast<unsigned char*>(frame.result().values().data())",
+                frame_timestamp_function="QDateTime::currentMSecsSinceEpoch();",
+                frame_is_extended="true"
+                )
+        else:
+            s = QT_MESSAGES_CLASSES_DECLARATIONS_FMT.format(
+                database_name=database_name,
+                message_name=message.snake_name,
+                message_id=hex(message.frame_id),
+                message_is_extended=str(message.is_extended_frame).lower(),
+                message_length=message.length,
+                signals_received_code='\n'.join(signals_received_code),
+                entity_frame_type="QCanBusFrame",
+                frame_length_function="frame.payload().length()",
+                frame_length_parameter="" if args.no_size_and_memset else ",\n                    static_cast<size_t>(frame.payload().length())",
+                frame_payload_function="reinterpret_cast<unsigned char*>(frame.payload().data())",
+                frame_timestamp_function="((frame.timeStamp().seconds() * 1000) + (frame.timeStamp().microSeconds() / 1000));",
+                frame_is_extended="frame.hasExtendedFrameFormat()"
+                )
+            
         messages_classes_declarations.append(s)
 
         messages_instantations.append("        map[{message_id}] = new {database_name}QtMessage_{message_name}({specific_parameters_values} {message_id}, {message_is_extended}, {message_length}, {message_cycle_time});".format(
@@ -370,7 +384,7 @@ def _generate_qt_declarations(database_name, messages, signals, for_modbus):
             message_length=message.length,
             message_is_extended=str(message.is_extended_frame).lower(),
             message_cycle_time=message.cycle_time,
-            specific_parameters_values=("%s," % message.node.dbc.attributes.get("StationAddress", 1).value) if for_modbus else ""
+            specific_parameters_values=("%s," % message.node.dbc.attributes.get("StationAddress", 1).value) if args.for_modbus else ""
             ))
 
         if (message.cycle_time != 0):
@@ -400,7 +414,7 @@ class QVariantSignal_%(snake_name)s : public QVariant%(history_type)sSignal%(dat
 """
     return: signals_instantiations, signals_send_methods
 """
-def _generate_qt_definitions(database_name, signals, for_modbus):
+def _generate_qt_definitions(database_name, signals, args):
     signals_instantiations = list()
     signals_send_methods = list()
     
@@ -436,6 +450,7 @@ def _generate_qt_definitions(database_name, signals, for_modbus):
             database_name=database_name,
             signal_name=signal.snake_name,
     	    message_name=signal.message.snake_name,
+            message_length_parameter="" if args.no_size_and_memset else f", {signal.message.length}",
             message_length=signal.message.length,
             message_is_extended=str(signal.message.is_extended_frame).lower(),
             ))
@@ -448,7 +463,7 @@ def generate_qt(database,
              header_name,
              source_name,
              signals,
-             for_modbus):
+             args):
     """Generate C source code from given CAN database `database`.
 
     `database_name` is used as a prefix for all defines, data
@@ -512,7 +527,7 @@ def generate_qt(database,
 			       database_name,
                    messages_qt,
                    signals_qt,
-                   for_modbus)
+                   args)
 
     header = QT_HEADER_FMT.format(commandline=" ".join(sys.argv),
                    version=__version__,
@@ -525,16 +540,16 @@ def generate_qt(database,
 			       messages_classes_declarations=messages_classes_declarations,
 			       messages_instantations=messages_instantations,
                    messages_check_validity=messages_check_validity,
-                   entity_frame_type="QModbusReply" if for_modbus else "QCanBusFrame",
-                   specific_parameters_definitions="uint stationAddress," if for_modbus else "",
-                   specific_parameters_declarations="const uint m_stationAddress;" if for_modbus else "",
-                   specific_parameters_initializations="m_stationAddress(stationAddress)," if for_modbus else "",
+                   entity_frame_type="QModbusReply" if args.for_modbus else "QCanBusFrame",
+                   specific_parameters_definitions="uint stationAddress," if args.for_modbus else "",
+                   specific_parameters_declarations="const uint m_stationAddress;" if args.for_modbus else "",
+                   specific_parameters_initializations="m_stationAddress(stationAddress)," if args.for_modbus else "",
                    )
 
     # CPP
     signals_instantiations, signals_send_methods = _generate_qt_definitions(database_name,
                    signals_qt,
-                   for_modbus)
+                   args)
 
     offset_calculation_for_modbus="""switch(frame.result().registerType()) {
     case QModbusDataUnit::Invalid: offset = 0; break;
@@ -552,10 +567,10 @@ def generate_qt(database,
                    database_name=database_name,
                    signals_instantiations=signals_instantiations,
 			       signals_send_methods=signals_send_methods,
-                   entity_frame_type="QModbusReply" if for_modbus else "QCanBusFrame",
-                   frame_id_function="static_cast<uint>(frame.result().startAddress())" if for_modbus else "frame.frameId()",
-                   frame_has_send_frame="0" if for_modbus else "1",
-                   frame_id_offset_calculation=offset_calculation_for_modbus if for_modbus else ""
+                   entity_frame_type="QModbusReply" if args.for_modbus else "QCanBusFrame",
+                   frame_id_function="static_cast<uint>(frame.result().startAddress())" if args.for_modbus else "frame.frameId()",
+                   frame_has_send_frame="0" if args.for_modbus else "1",
+                   frame_id_offset_calculation=offset_calculation_for_modbus if args.for_modbus else ""
                    )
 
     return header, source

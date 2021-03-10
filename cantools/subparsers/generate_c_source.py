@@ -29,8 +29,8 @@ def _do_generate_qt_source(args):
         database_name,
         filename_h,
         filename_c,
-	    args.signals,
-        args.for_modbus)
+        args.signals,
+	    args)
 
     with open(filename_h, 'w') as fout:
         fout.write(header)
@@ -115,7 +115,8 @@ def _do_generate_c_source(args):
         fuzzer_filename_c,
         not args.no_floating_point_numbers,
         args.bit_fields,
-        no_range_check=args.no_range_check)
+        no_range_check=args.no_range_check,
+        no_size_and_memset=args.no_size_and_memset)
 
     os.makedirs(args.output_directory, exist_ok=True)
     
@@ -180,6 +181,10 @@ def add_subparser(subparsers):
         action='store_true',
         help='Skip range checks.')
     generate_c_source_parser.add_argument(
+        '--no-size-and-memset',
+        action='store_true',
+        help='Do not use size check and zero memset for incoming messages.')
+    generate_c_source_parser.add_argument(
         '-f', '--generate-fuzzer',
         action='store_true',
         help='Also generate fuzzer source code.')
@@ -226,6 +231,10 @@ def add_qt_subparser(subparsers):
         '--no-strict',
         action='store_true',
         help='Skip database consistency checks.')
+    generate_qt_source.add_argument(
+        '--no-size-and-memset',
+        action='store_true',
+        help='Do not use size check and zero memset for incoming messages.')
     generate_qt_source.add_argument(
         'infile',
         help='Input database file.')

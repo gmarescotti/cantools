@@ -364,6 +364,32 @@ int {database_name}_{message_name}_unpack(
     size_t size);
 '''
 
+DECLARATION_FMT_WITHOUT_SIZE = '''\
+/**
+ * Pack message {database_message_name}.
+ *
+ * @param[out] dst_p Buffer to pack the message into.
+ * @param[in] src_p Data to pack.
+ *
+ * @return Size of packed data, or negative error code.
+ */
+int {database_name}_{message_name}_pack(
+    uint8_t *dst_p,
+    const struct {database_name}_{message_name}_t *src_p);
+
+/**
+ * Unpack message {database_message_name}.
+ *
+ * @param[out] dst_p Object to unpack the message into.
+ * @param[in] src_p Message to unpack.
+ *
+ * @return zero(0) or negative error code.
+ */
+int {database_name}_{message_name}_unpack(
+    struct {database_name}_{message_name}_t *dst_p,
+    const uint8_t *src_p);
+'''
+
 SIGNAL_DECLARATION_ENCODE_DECODE_FMT = '''\
 /**
  * Encode given signal by applying scaling and offset.
@@ -463,6 +489,28 @@ int {database_name}_{message_name}_unpack(
     if (size < {message_length}u) {{
         return (-EINVAL);
     }}
+{unpack_body}
+    return (0);
+}}
+'''
+
+DEFINITION_FMT_WITHOUT_SIZE = '''\
+int {database_name}_{message_name}_pack(
+    uint8_t *dst_p,
+    const struct {database_name}_{message_name}_t *src_p)
+{{
+{pack_unused}\
+{pack_variables}\
+{pack_body}
+    return ({message_length});
+}}
+
+int {database_name}_{message_name}_unpack(
+    struct {database_name}_{message_name}_t *dst_p,
+    const uint8_t *src_p)
+{{
+{unpack_unused}\
+{unpack_variables}\
 {unpack_body}
     return (0);
 }}
@@ -1342,7 +1390,7 @@ def _generate_structs(database_name, messages, bit_fields):
     return '\n'.join(structs)
 
 
-def _generate_declarations(database_name, messages, floating_point_numbers, no_range_check=False):
+def _generate_declarations(database_name, messages, floating_point_numbers, no_range_check, no_size_and_memset):
     declarations = []
 
     for message in messages:
@@ -1366,8 +1414,10 @@ def _generate_declarations(database_name, messages, floating_point_numbers, no_r
                     type_name=signal.type_name)
 
             signal_declarations.append(signal_declaration)
+        
+        MY_DECLARATION_FMT = DECLARATION_FMT_WITHOUT_SIZE if no_size_and_memset else DECLARATION_FMT
 
-        declaration = DECLARATION_FMT.format(database_name=database_name,
+        declaration = MY_DECLARATION_FMT.format(database_name=database_name,
                                              database_message_name=message.name,
                                              message_name=message.snake_name)
 
@@ -1379,7 +1429,7 @@ def _generate_declarations(database_name, messages, floating_point_numbers, no_r
     return '\n'.join(declarations)
 
 
-def _generate_definitions(database_name, messages, floating_point_numbers, no_range_check=False):
+def _generate_definitions(database_name, messages, floating_point_numbers, no_range_check, no_size_and_memset):
     definitions = []
     pack_helper_kinds = set()
     unpack_helper_kinds = set()
@@ -1431,8 +1481,16 @@ def _generate_definitions(database_name, messages, floating_point_numbers, no_ra
             if not unpack_body:
                 unpack_unused += '    (void)dst_p;\n'
                 unpack_unused += '    (void)src_p;\n\n'
+                
+            if not no_size_and_memset:
+                pack_check_size_and_memset = f"    if (size < {message.length}) return (-EINVAL);\n\n    memset(&dst_p[0], 0, {message.length});\n"
+            else:
+                pack_check_size_and_memset = ""
+                
+            
+            MY_DEFINITION_FMT = DEFINITION_FMT_WITHOUT_SIZE if no_size_and_memset else DEFINITION_FMT
 
-            definition = DEFINITION_FMT.format(database_name=database_name,
+            definition = MY_DEFINITION_FMT.format(database_name=database_name,
                                                database_message_name=message.name,
                                                message_name=message.snake_name,
                                                message_length=message.length,
@@ -1525,7 +1583,8 @@ def generate(database,
              fuzzer_source_name,
              floating_point_numbers=True,
              bit_fields=False,
-             no_range_check=False):
+             no_range_check=False,
+             no_size_and_memset=False):
     """Generate C source code from given CAN database `database`.
 
     `database_name` is used as a prefix for all defines, data
@@ -1564,14 +1623,18 @@ def generate(database,
         messages)
     choices_defines = _generate_choices_defines(database_name, messages)
     structs = _generate_structs(database_name, messages, bit_fields)
+    
     declarations = _generate_declarations(database_name,
                                           messages,
                                           floating_point_numbers,
-                                          no_range_check)
+                                          no_range_check,
+                                          no_size_and_memset)
+    
     definitions, helper_kinds = _generate_definitions(database_name,
                                                       messages,
                                                       floating_point_numbers,
-                                                      no_range_check)
+                                                      no_range_check, 
+                                                      no_size_and_memset)
     helpers = _generate_helpers(helper_kinds)
 
     header = HEADER_FMT.format(version=__version__,
