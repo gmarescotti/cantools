@@ -110,6 +110,9 @@ SOURCE_FMT = '''\
 
 #include "{header}"
 
+#define encode_scale_offset(value, scale, offset) ((value - offset) / scale)
+#define decode_scale_offset(value, scale, offset) ((value * scale) + offset)
+
 {helpers}\
 {definitions}\
 '''
@@ -567,7 +570,6 @@ SIGN_EXTENSION_FMT = '''
     if (({name} & (1{suffix} << {shift})) != 0{suffix}) {{
         {name} |= 0x{mask:x}{suffix};
     }}
-
 '''
 
 SIGNAL_MEMBER_FMT = '''\
@@ -925,13 +927,15 @@ def _format_pack_code_mux(message,
                           mux,
                           body_lines_per_index,
                           variable_lines,
-                          helper_kinds):
+                          helper_kinds,
+                          args):
     signal_name, multiplexed_signals = list(mux.items())[0]
     _format_pack_code_signal(message,
                              signal_name,
                              body_lines_per_index,
                              variable_lines,
-                             helper_kinds)
+                             helper_kinds,
+                             args)
     multiplexed_signals_per_id = sorted(list(multiplexed_signals.items()))
     signal_name = camel_to_snake_case(signal_name)
 
@@ -944,7 +948,8 @@ def _format_pack_code_mux(message,
         body_lines = _format_pack_code_level(message,
                                              multiplexed_signals,
                                              variable_lines,
-                                             helper_kinds)
+                                             helper_kinds,
+                                             args)
         lines.append('')
         lines.append('case {}:'.format(multiplexer_id))
 
@@ -966,7 +971,8 @@ def _format_pack_code_signal(message,
                              signal_name,
                              body_lines,
                              variable_lines,
-                             helper_kinds):
+                             helper_kinds,
+                             args):
     signal = message.get_signal_by_name(signal_name)
 
     if signal.is_float or signal.as_float or signal.is_signed:
@@ -977,7 +983,15 @@ def _format_pack_code_signal(message,
             conversion = '    memcpy(&{0}, &src_p->{0}, sizeof({0}));'.format(
                 signal.snake_name)
         elif signal.as_float:
-            conversion = f'    {signal.snake_name} = (uint{signal.type_length}_t){message.parent}_{message.snake_name}_{signal.snake_name}_encode(src_p->{signal.snake_name});'
+            if args.no_floating_point_numbers:
+                if signal.decimal.scale == 1 and signal.decimal.offset == 0:
+                    conversion = f'    {signal.snake_name} = (uint{signal.type_length}_t)src_p->{signal.snake_name};'
+                else:
+                    formatted_scale = _format_decimal(signal.decimal.scale, is_float=True)
+                    formatted_offset = _format_decimal(signal.decimal.offset, is_float=True)
+                    conversion = f'    {signal.snake_name} = (uint{signal.type_length}_t)encode_scale_offset(src_p->{signal.snake_name}, {formatted_scale}, {formatted_offset});'
+            else:
+                conversion = f'    {signal.snake_name} = (uint{signal.type_length}_t){message.parent}_{message.snake_name}_{signal.snake_name}_encode(src_p->{signal.snake_name});'
         else:
             conversion = '    {0} = (uint{1}_t)src_p->{0};'.format(
                 signal.snake_name,
@@ -1005,7 +1019,8 @@ def _format_pack_code_signal(message,
 def _format_pack_code_level(message,
                             signal_names,
                             variable_lines,
-                            helper_kinds):
+                            helper_kinds,
+                            args):
     """Format one pack level in a signal tree.
 
     """
@@ -1019,14 +1034,16 @@ def _format_pack_code_level(message,
                                               signal_name,
                                               body_lines,
                                               variable_lines,
-                                              helper_kinds)
+                                              helper_kinds,
+                                              args)
             muxes_lines += mux_lines
         else:
             _format_pack_code_signal(message,
                                      signal_name,
                                      body_lines,
                                      variable_lines,
-                                     helper_kinds)
+                                     helper_kinds,
+                                     args)
 
     body_lines = body_lines + muxes_lines
 
@@ -1036,12 +1053,13 @@ def _format_pack_code_level(message,
     return body_lines
 
 
-def _format_pack_code(message, helper_kinds):
+def _format_pack_code(message, helper_kinds, args):
     variable_lines = []
     body_lines = _format_pack_code_level(message,
                                          message.signal_tree,
                                          variable_lines,
-                                         helper_kinds)
+                                         helper_kinds,
+                                         args)
 
     if variable_lines:
         variable_lines = sorted(list(set(variable_lines))) + ['', '']
@@ -1053,13 +1071,15 @@ def _format_unpack_code_mux(message,
                             mux,
                             body_lines_per_index,
                             variable_lines,
-                            helper_kinds):
+                            helper_kinds,
+                            args):
     signal_name, multiplexed_signals = list(mux.items())[0]
     _format_unpack_code_signal(message,
                                signal_name,
                                body_lines_per_index,
                                variable_lines,
-                               helper_kinds)
+                               helper_kinds,
+                               args)
     multiplexed_signals_per_id = sorted(list(multiplexed_signals.items()))
     signal_name = camel_to_snake_case(signal_name)
 
@@ -1071,7 +1091,8 @@ def _format_unpack_code_mux(message,
         body_lines = _format_unpack_code_level(message,
                                                multiplexed_signals,
                                                variable_lines,
-                                               helper_kinds)
+                                               helper_kinds,
+                                               args)
         lines.append('')
         lines.append('case {}:'.format(multiplexer_id))
         lines.extend(_strip_blank_lines(body_lines))
@@ -1090,7 +1111,8 @@ def _format_unpack_code_signal(message,
                                signal_name,
                                body_lines,
                                variable_lines,
-                               helper_kinds):
+                               helper_kinds,
+                               args):
     signal = message.get_signal_by_name(signal_name)
     conversion_type_name = 'uint{}_t'.format(signal.type_length)
 
@@ -1120,13 +1142,17 @@ def _format_unpack_code_signal(message,
         helper_kinds.add((shift_direction, signal.type_length))
 
     if signal.is_float:
-        conversion = '    memcpy(&dst_p->{0}, &{0}, sizeof(dst_p->{0}));'.format(
-            signal.snake_name)
-        body_lines.append(conversion)
+        conversion = '    memcpy(&dst_p->{0}, &{0}, sizeof(dst_p->{0}));'.format(signal.snake_name)
     elif signal.as_float:
-        # suncharger_hmi0150_debug150_vfase_ref_encode
-        conversion = f'    dst_p->{signal.snake_name} = {message.parent}_{message.snake_name}_{signal.snake_name}_decode(({signal.type_name}){signal.snake_name});'
-        body_lines.append(conversion)
+        if args.no_floating_point_numbers:
+            if signal.decimal.scale == 1 and signal.decimal.offset == 0:
+                conversion = f'    dst_p->{signal.snake_name} = (uint{signal.type_length}_t){signal.snake_name};'
+            else:
+                formatted_scale = _format_decimal(signal.decimal.scale, is_float=True)
+                formatted_offset = _format_decimal(signal.decimal.offset, is_float=True)
+                conversion = f'    dst_p->{signal.snake_name} = (uint{signal.type_length}_t)decode_scale_offset({signal.snake_name}, {formatted_scale}, {formatted_offset});'
+        else:
+            conversion = f'    dst_p->{signal.snake_name} = {message.parent}_{message.snake_name}_{signal.snake_name}_decode(({signal.type_name}){signal.snake_name});'
     elif signal.is_signed:
         mask = ((1 << (signal.type_length - signal.length)) - 1)
 
@@ -1140,13 +1166,16 @@ def _format_unpack_code_signal(message,
 
         conversion = '    dst_p->{0} = (int{1}_t){0};'.format(signal.snake_name,
                                                               signal.type_length)
-        body_lines.append(conversion)
+    else:
+        return
+    body_lines.append(conversion)
 
 
 def _format_unpack_code_level(message,
                               signal_names,
                               variable_lines,
-                              helper_kinds):
+                              helper_kinds,
+                              args):
     """Format one unpack level in a signal tree.
 
     """
@@ -1160,7 +1189,8 @@ def _format_unpack_code_level(message,
                                                 signal_name,
                                                 body_lines,
                                                 variable_lines,
-                                                helper_kinds)
+                                                helper_kinds,
+                                                args)
 
             if muxes_lines:
                 muxes_lines.append('')
@@ -1171,7 +1201,8 @@ def _format_unpack_code_level(message,
                                        signal_name,
                                        body_lines,
                                        variable_lines,
-                                       helper_kinds)
+                                       helper_kinds,
+                                       args)
 
     if body_lines:
         if body_lines[-1] != '':
@@ -1188,12 +1219,13 @@ def _format_unpack_code_level(message,
     return body_lines
 
 
-def _format_unpack_code(message, helper_kinds):
+def _format_unpack_code(message, helper_kinds, args):
     variable_lines = []
     body_lines = _format_unpack_code_level(message,
                                            message.signal_tree,
                                            variable_lines,
-                                           helper_kinds)
+                                           helper_kinds,
+                                           args)
 
     if variable_lines:
         variable_lines = sorted(list(set(variable_lines))) + ['', '']
@@ -1488,13 +1520,16 @@ def _generate_definitions(database_name, messages, args):
                     unused=unused,
                     check=check)
 
-            signal_definitions.append(signal_definition)
+            if signal_definition:
+                signal_definitions.append(signal_definition)
 
         if message.length > 0:
             pack_variables, pack_body = _format_pack_code(message,
-                                                          pack_helper_kinds)
+                                                          pack_helper_kinds,
+                                                          args)
             unpack_variables, unpack_body = _format_unpack_code(message,
-                                                                unpack_helper_kinds)
+                                                                unpack_helper_kinds,
+                                                                args)
             pack_unused = ''
             unpack_unused = ''
 

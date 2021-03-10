@@ -215,6 +215,13 @@ QT_SIGNALS_RECEIVED_CODE_FMT = '''\
         }}
 '''
 
+QT_SIGNALS_RECEIVED_CODE_WITHOUT_ENCDEC_FMT = '''\
+        if (signals_store.m_{signal_name}->m_val != store.{signal_name}) {{
+            emit signals_store.m_{signal_name}->on_change(QDateTime::fromMSecsSinceEpoch(m_timestamp));
+            qDebug() << hex << "m_{signal_name}=" << signals_store.m_{signal_name}->m_val;
+        }}
+'''
+
 QT_MESSAGES_CLASSES_DECLARATIONS_FMT = '''\
 class {database_name}QtMessage_{message_name} : public {database_name}QtMessage
 {{
@@ -222,7 +229,6 @@ class {database_name}QtMessage_{message_name} : public {database_name}QtMessage
 
     void received(const {entity_frame_type} &frame) {{
         {database_name}QtSignals &signals_store = {database_name}QtSignals::instance();
-        double x;
 
         m_timestamp = {frame_timestamp_function}
 
@@ -336,7 +342,11 @@ def _generate_qt_declarations(database_name, messages, signals, args):
 
         signals_received_code = list()
         for signal in message.used_signals:
-            signals_received_code.append(QT_SIGNALS_RECEIVED_CODE_FMT.format(
+            if args.no_floating_point_numbers:
+                MY_QT_SIGNALS_RECEIVED_CODE_FMT = QT_SIGNALS_RECEIVED_CODE_WITHOUT_ENCDEC_FMT
+            else:
+                MY_QT_SIGNALS_RECEIVED_CODE_FMT = QT_SIGNALS_RECEIVED_CODE_FMT
+            signals_received_code.append(MY_QT_SIGNALS_RECEIVED_CODE_FMT.format(
                 database_name=database_name,
                 message_name=message.snake_name,
     	        signal_name=signal.snake_name
