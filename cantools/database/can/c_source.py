@@ -3,6 +3,7 @@ import time
 from decimal import Decimal
 
 from ...version import __version__
+from ..can import Node
 
 HEADER_FMT = '''\
 /**
@@ -334,6 +335,25 @@ struct {database_name}_{message_name}_t {{
 }};
 '''
 
+NODE_DECLARATION_FMT = '''\
+/**
+ * Manages every messages for specific node {database_message_name}.
+ * Changed signal(s) will be emitted, eventually.
+ *
+ * @param[in] is_extended whether message is extended or standard.
+ * @param[in] id identifier of message.
+ * @param[in] src_p Message to unpack.
+ * @param[in] size Size of src_p.
+ *
+ * @return zero(0) or negative error code.
+ */
+int {database_name}_{database_message_name}_unpack_id(
+    bool is_extended,
+    int src_id,
+    const uint8_t *src_p,
+    size_t size);
+'''
+
 DECLARATION_FMT = '''\
 /**
  * Pack message {database_message_name}.
@@ -459,6 +479,39 @@ static inline {var_type} unpack_right_shift_u{length}(
     uint8_t mask)
 {{
     return ({var_type})(({var_type})(value & mask) >> shift);
+}}
+'''
+
+NODE_DEFINITION_FMT = '''\
+int {database_name}_{database_message_name}_unpack_id(
+    bool is_extended,
+    int src_id,
+    const uint8_t *src_p,
+    size_t size)
+{{
+{pack_unused}\
+{pack_variables}\
+    if (size < {message_length}u) {{
+        return (-EINVAL);
+    }}
+
+    memset(&dst_p[0], 0, {message_length});
+{pack_body}
+    return ({message_length});
+}}
+
+int {database_name}_{message_name}_unpack(
+    struct {database_name}_{message_name}_t *dst_p,
+    const uint8_t *src_p,
+    size_t size)
+{{
+{unpack_unused}\
+{unpack_variables}\
+    if (size < {message_length}u) {{
+        return (-EINVAL);
+    }}
+{unpack_body}
+    return (0);
 }}
 '''
 
@@ -1393,6 +1446,13 @@ def _generate_structs(database_name, messages, bit_fields):
 def _generate_declarations(database_name, messages, floating_point_numbers, no_range_check, no_size_and_memset):
     declarations = []
 
+    for node in nodes:
+        declaration = NODE_DECLARATION_FMT.format(database_name=database_name,
+                                             database_message_name=node.name,
+                                             message_name=node.name)
+
+        declarations.append(declaration)
+    
     for message in messages:
         signal_declarations = []
 
@@ -1434,6 +1494,32 @@ def _generate_definitions(database_name, messages, floating_point_numbers, no_ra
     pack_helper_kinds = set()
     unpack_helper_kinds = set()
 
+    # GGGG for node in nodes: pass
+    for node in nodes:
+        pack_unused = ''
+        unpack_unused = ''
+        pack_variables = ''
+        pack_body = ''
+        unpack_variables = ''
+        unpack_body = ''
+        
+        definition = NODE_DEFINITION_FMT.format(database_name=database_name,
+                                           database_message_name=node.name,
+                                           message_name=node.name,
+                                           message_length=8,
+                                           pack_unused=pack_unused,
+                                           unpack_unused=unpack_unused,
+                                           pack_variables=pack_variables,
+                                           pack_body=pack_body,
+                                           unpack_variables=unpack_variables,
+                                           unpack_body=unpack_body
+                                           )
+#         definition = NODE_DEFINITION_FMT.format(database_name=database_name,
+#                                              database_message_name=node.name,
+#                                              message_name=node.name)
+
+        definitions.append(definition)
+        
     for message in messages:
         signal_definitions = []
 
@@ -1583,6 +1669,7 @@ def generate(database,
              fuzzer_source_name,
              floating_point_numbers=True,
              bit_fields=False,
+             generate_nodes=False,
              no_range_check=False,
              no_size_and_memset=False):
     """Generate C source code from given CAN database `database`.
@@ -1603,6 +1690,8 @@ def generate(database,
     numbers in the generated code.
 
     Set `bit_fields` to ``True`` to generate bit fields in structs.
+    
+    Set `generate_nodes` to ``True`` to also generate functions that manage every messages for the specific node
 
     This function returns a tuple of the C header and source files as
     strings.
@@ -1611,6 +1700,9 @@ def generate(database,
 
     date = time.ctime()
     messages = [Message(message) for message in database.messages]
+
+    Node.fill_senders_receivers(database)
+        
     include_guard = '{}_H'.format(database_name.upper())
     frame_id_defines = _generate_frame_id_defines(database_name, messages)
     frame_length_defines = _generate_frame_length_defines(database_name,
@@ -1626,12 +1718,14 @@ def generate(database,
     
     declarations = _generate_declarations(database_name,
                                           messages,
+                                          database.nodes,
                                           floating_point_numbers,
                                           no_range_check,
                                           no_size_and_memset)
     
     definitions, helper_kinds = _generate_definitions(database_name,
                                                       messages,
+                                                      database.nodes,
                                                       floating_point_numbers,
                                                       no_range_check, 
                                                       no_size_and_memset)

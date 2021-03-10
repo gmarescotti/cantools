@@ -115,6 +115,7 @@ def _do_generate_c_source(args):
         fuzzer_filename_c,
         not args.no_floating_point_numbers,
         args.bit_fields,
+        args.generate_nodes,
         no_range_check=args.no_range_check,
         no_size_and_memset=args.no_size_and_memset)
 
@@ -192,6 +193,10 @@ def add_subparser(subparsers):
         '-o', '--output-directory',
         default='.',
         help='Directory in which to write output files.')
+    generate_c_source_parser.add_argument(
+        '--generate-nodes',
+        action='store_true',
+        help='Also generate nodes grouped messages source code.')
     generate_c_source_parser.add_argument(
         'infile',
         help='Input database file.')

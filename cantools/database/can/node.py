@@ -12,6 +12,8 @@ class Node(object):
         self._name = name
         self._comment = comment
         self._dbc = dbc_specifics
+        self._senders = set()
+        self._receivers = set()
 
     @property
     def name(self):
@@ -49,7 +51,40 @@ class Node(object):
     def dbc(self, value):
         self._dbc = value
 
+    @staticmethod
+    def fill_senders_receivers(database):
+        # GGG push "messages" in any node
+        allnodes = dict()   
+        for node in database.nodes:
+            allnodes[node.name] = node
+
+        for message in database.messages:
+            for sender in message.senders:
+                allnodes[sender]._senders.add(message)
+                
+            for signal in message.signals:
+                for receiver in signal.receivers:
+                    allnodes[receiver]._receivers.add(message)
+
+    @property
+    def senders(self):
+        """The node senders as a list.
+
+        """
+
+        return self._senders
+
+    @property
+    def receivers(self):
+        """The node senders as a list.
+
+        """
+
+        return self._receivers
+    
     def __repr__(self):
-        return "node('{}', {})".format(
+        return "node('{}', {}, {}, {})".format(
             self._name,
-            "'" + self._comment + "'" if self._comment is not None else None)
+            "'" + self._comment + "'" if self._comment is not None else None,
+            self._senders,
+            self._receivers)
