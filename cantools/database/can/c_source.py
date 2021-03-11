@@ -1475,7 +1475,8 @@ def _generate_declarations(database_name, messages, args):
                     signal_name=signal.snake_name,
                     type_name=signal.type_name)
 
-            signal_declarations.append(signal_declaration)
+            if signal_declaration:
+                signal_declarations.append(signal_declaration)
 
         declaration = ''
                 
