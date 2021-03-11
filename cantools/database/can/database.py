@@ -6,6 +6,8 @@ from .formats import kcd
 from .formats import sym
 from .internal_database import InternalDatabase
 from ...compat import fopen
+from .c_source import camel_to_snake_case
+import os
 
 
 LOGGER = logging.getLogger(__name__)
@@ -425,3 +427,61 @@ class Database(object):
             lines.append('')
 
         return '\n'.join(lines)
+
+    def customize_database(self, args):
+        # =========================================================
+        # apply database name change
+        if args.database_name is None:
+            basename = os.path.basename(args.infile)
+            args.database_name = os.path.splitext(basename)[0]
+            args.database_name = camel_to_snake_case(args.database_name)
+
+        # =========================================================
+        # apply filter based on the specified nodes
+        nodes = getattr(args, "only_nodes", "")
+        nodes = nodes.split(",") if nodes else []
+        assert self.messages, "Database does not contain message!"
+        
+        if nodes:
+            for message in self.messages[:]:
+                # ---------- compute senders --------------------
+                if len(message.senders) == 0:
+                    print("Warning: message %s does not have any sender!" % message.name)
+                    
+                if any(item in message.senders for item in nodes):
+                    # message sends from one of the specified node
+                    message.has_senders = True
+                else:
+                    message.has_senders = False
+                
+                # ---------- compute receivers --------------------
+                for signal in message.signals[:]:
+                    if len(signal.receivers) == 0:
+                        print("Warning: signal %s does not have any receivers!" % signal.name)
+                        
+                    if not any(item in nodes for item in signal.receivers):
+                        # signal does not receive from any of the specified nodes
+                        # => remove signal from message
+                        # (remove only if does not have a sender!)
+                        if not message.has_senders:
+                            message.signals.remove(signal)
+                            message.refresh()
+                        signal.has_receivers = False
+                    else:
+                        signal.has_receivers = True
+                
+                # any signals in message not sent from any of the specified node
+                message.has_receivers = any(map(lambda x: x.has_receivers, message.signals))
+                    
+                # ---------- filter orphan messages -------------
+                if (not message.has_receivers) and (not message.has_senders):
+                    print("Removed ", message)
+                    self.messages.remove(message)
+        else: # when nodes not specified means all nodes
+            for message in self.messages:
+                message.has_senders = True
+                message.has_receivers = True
+                for signal in message.signals:
+                    signal.has_receivers = True
+                    
+        assert self.messages, "Database does not contain message from nodes %s!" % nodes

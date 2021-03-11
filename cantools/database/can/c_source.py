@@ -337,7 +337,7 @@ struct {database_name}_{message_name}_t {{
 }};
 '''
 
-DECLARATION_FMT = '''\
+DECLARATION_PACK_FMT = '''\
 /**
  * Pack message {database_message_name}.
  *
@@ -351,7 +351,9 @@ int {database_name}_{message_name}_pack(
     uint8_t *dst_p,
     const struct {database_name}_{message_name}_t *src_p,
     size_t size);
+'''
 
+DECLARATION_UNPACK_FMT = '''\
 /**
  * Unpack message {database_message_name}.
  *
@@ -367,7 +369,7 @@ int {database_name}_{message_name}_unpack(
     size_t size);
 '''
 
-DECLARATION_FMT_WITHOUT_SIZE = '''\
+DECLARATION_PACK_FMT_WITHOUT_SIZE = '''\
 /**
  * Pack message {database_message_name}.
  *
@@ -379,7 +381,9 @@ DECLARATION_FMT_WITHOUT_SIZE = '''\
 int {database_name}_{message_name}_pack(
     uint8_t *dst_p,
     const struct {database_name}_{message_name}_t *src_p);
+'''
 
+DECLARATION_UNPACK_FMT_WITHOUT_SIZE = '''\
 /**
  * Unpack message {database_message_name}.
  *
@@ -465,7 +469,7 @@ static inline {var_type} unpack_right_shift_u{length}(
 }}
 '''
 
-DEFINITION_FMT = '''\
+DEFINITION_PACK_FMT = '''\
 int {database_name}_{message_name}_pack(
     uint8_t *dst_p,
     const struct {database_name}_{message_name}_t *src_p,
@@ -481,7 +485,9 @@ int {database_name}_{message_name}_pack(
 {pack_body}
     return ({message_length});
 }}
+'''
 
+DEFINITION_UNPACK_FMT = '''\
 int {database_name}_{message_name}_unpack(
     struct {database_name}_{message_name}_t *dst_p,
     const uint8_t *src_p,
@@ -497,7 +503,7 @@ int {database_name}_{message_name}_unpack(
 }}
 '''
 
-DEFINITION_FMT_WITHOUT_SIZE = '''\
+DEFINITION_PACK_FMT_WITHOUT_SIZE = '''\
 int {database_name}_{message_name}_pack(
     uint8_t *dst_p,
     const struct {database_name}_{message_name}_t *src_p)
@@ -507,7 +513,9 @@ int {database_name}_{message_name}_pack(
 {pack_body}
     return ({message_length});
 }}
+'''
 
+DEFINITION_UNPACK_FMT_WITHOUT_SIZE = '''\
 int {database_name}_{message_name}_unpack(
     struct {database_name}_{message_name}_t *dst_p,
     const uint8_t *src_p)
@@ -1468,13 +1476,23 @@ def _generate_declarations(database_name, messages, args):
                     type_name=signal.type_name)
 
             signal_declarations.append(signal_declaration)
+
+        declaration = ''
+                
+        if message.has_senders:
+            MY_DECLARATION_PACK_FMT = DECLARATION_PACK_FMT_WITHOUT_SIZE if args.no_size_and_memset else DECLARATION_PACK_FMT
+    
+            declaration += MY_DECLARATION_PACK_FMT.format(database_name=database_name,
+                                                 database_message_name=message.name,
+                                                 message_name=message.snake_name)
+
+        if message.has_receivers:
+            MY_DECLARATION_UNPACK_FMT = DECLARATION_UNPACK_FMT_WITHOUT_SIZE if args.no_size_and_memset else DECLARATION_UNPACK_FMT
+    
+            declaration += MY_DECLARATION_UNPACK_FMT.format(database_name=database_name,
+                                                 database_message_name=message.name,
+                                                 message_name=message.snake_name)
         
-        MY_DECLARATION_FMT = DECLARATION_FMT_WITHOUT_SIZE if args.no_size_and_memset else DECLARATION_FMT
-
-        declaration = MY_DECLARATION_FMT.format(database_name=database_name,
-                                             database_message_name=message.name,
-                                             message_name=message.snake_name)
-
         if signal_declarations:
             declaration += '\n' + '\n'.join(signal_declarations)
 
@@ -1545,19 +1563,36 @@ def _generate_definitions(database_name, messages, args):
             else:
                 pack_check_size_and_memset = ""
                 
-            
-            MY_DEFINITION_FMT = DEFINITION_FMT_WITHOUT_SIZE if args.no_size_and_memset else DEFINITION_FMT
+            definition = ''
 
-            definition = MY_DEFINITION_FMT.format(database_name=database_name,
-                                               database_message_name=message.name,
-                                               message_name=message.snake_name,
-                                               message_length=message.length,
-                                               pack_unused=pack_unused,
-                                               unpack_unused=unpack_unused,
-                                               pack_variables=pack_variables,
-                                               pack_body=pack_body,
-                                               unpack_variables=unpack_variables,
-                                               unpack_body=unpack_body)
+            if message.has_senders:
+                MY_DEFINITION_PACK_FMT = DEFINITION_PACK_FMT_WITHOUT_SIZE if args.no_size_and_memset else DEFINITION_PACK_FMT
+            
+                definition += MY_DEFINITION_PACK_FMT.format(database_name=database_name,
+                                                   database_message_name=message.name,
+                                                   message_name=message.snake_name,
+                                                   message_length=message.length,
+                                                   pack_unused=pack_unused,
+                                                   unpack_unused=unpack_unused,
+                                                   pack_variables=pack_variables,
+                                                   pack_body=pack_body,
+                                                   unpack_variables=unpack_variables,
+                                                   unpack_body=unpack_body)
+            
+
+            if message.has_receivers:
+                MY_DEFINITION_UNPACK_FMT = DEFINITION_UNPACK_FMT_WITHOUT_SIZE if args.no_size_and_memset else DEFINITION_UNPACK_FMT
+
+                definition += MY_DEFINITION_UNPACK_FMT.format(database_name=database_name,
+                                                   database_message_name=message.name,
+                                                   message_name=message.snake_name,
+                                                   message_length=message.length,
+                                                   pack_unused=pack_unused,
+                                                   unpack_unused=unpack_unused,
+                                                   pack_variables=pack_variables,
+                                                   pack_body=pack_body,
+                                                   unpack_variables=unpack_variables,
+                                                   unpack_body=unpack_body)
         else:
             definition = EMPTY_DEFINITION_FMT.format(database_name=database_name,
                                                      message_name=message.snake_name)
@@ -1654,10 +1689,13 @@ def generate(database,
     `fuzzer_source_name` is the file name of the C source file, which
     is needed by the fuzzer makefile.
 
-    Set `no_floating_point_numbers` to ``False`` to allow floating point
-    numbers in the generated code.
+    Set `args.no_floating_point_numbers` to ``False`` to allow floating point
+    numbers in the generated code. Actually it enables use of decode/encode.
 
-    Set `bit_fields` to ``True`` to generate bit fields in structs.
+    Set `args.bit_fields` to ``True`` to generate bit fields in structs.
+    
+    Set `args.only_nodes` to a list of nodes for which to generate the sources.
+    Default is for every nodes.
 
     This function returns a tuple of the C header and source files as
     strings.
