@@ -110,8 +110,8 @@ SOURCE_FMT = '''\
 
 #include "{header}"
 
-#define encode_scale_offset(value, scale, offset) ((value - offset) / scale)
-#define decode_scale_offset(value, scale, offset) ((value * scale) + offset)
+#define encode_scale_offset(value, scale, offset) ((value - offset) * scale)
+#define decode_scale_offset(value, factor, offset) ((value * factor) + offset)
 
 {helpers}\
 {definitions}\
@@ -873,13 +873,13 @@ def _format_comment(comment):
 def _format_decimal(value, is_float=False):
     if int(value) == value:
         value = int(value)
-
+        
         if is_float:
             return str(value) + '.0f'
         else:
             return str(value)
     else:
-        return str(value) + "f"
+        return f'{value:.12g}f'
 
 
 def _format_range(signal):
@@ -995,8 +995,11 @@ def _format_pack_code_signal(message,
                 if signal.decimal.scale == 1 and signal.decimal.offset == 0:
                     conversion = f'    {signal.snake_name} = (uint{signal.type_length}_t)src_p->{signal.snake_name};'
                 else:
-                    formatted_scale = _format_decimal(signal.decimal.scale, is_float=True)
-                    formatted_offset = _format_decimal(signal.decimal.offset, is_float=True)
+                    scale2 = signal.dbc.attributes.get('Scale2.value', None)
+                    offset2 = signal.dbc.attributes.get('Offset2.value', None)
+            
+                    formatted_scale = _format_decimal(scale2 or (1/signal.decimal.scale), is_float=True)
+                    formatted_offset = _format_decimal(offset2 or signal.decimal.offset, is_float=True)
                     conversion = f'    {signal.snake_name} = (uint{signal.type_length}_t)encode_scale_offset(src_p->{signal.snake_name}, {formatted_scale}, {formatted_offset});'
             else:
                 conversion = f'    {signal.snake_name} = (uint{signal.type_length}_t){message.parent}_{message.snake_name}_{signal.snake_name}_encode(src_p->{signal.snake_name});'
@@ -1156,8 +1159,12 @@ def _format_unpack_code_signal(message,
             if signal.decimal.scale == 1 and signal.decimal.offset == 0:
                 conversion = f'    dst_p->{signal.snake_name} = (uint{signal.type_length}_t){signal.snake_name};'
             else:
-                formatted_scale = _format_decimal(signal.decimal.scale, is_float=True)
-                formatted_offset = _format_decimal(signal.decimal.offset, is_float=True)
+                scale2 = signal.dbc.attributes.get('Scale2.value', None)
+                if scale2: scale2 = 1 / int(scale2)
+                offset2 = signal.dbc.attributes.get('Offset2.value', None)
+            
+                formatted_scale = _format_decimal(scale2 or signal.decimal.scale, is_float=True)
+                formatted_offset = _format_decimal(offset2 or signal.decimal.offset, is_float=True)
                 conversion = f'    dst_p->{signal.snake_name} = (uint{signal.type_length}_t)decode_scale_offset({signal.snake_name}, {formatted_scale}, {formatted_offset});'
         else:
             conversion = f'    dst_p->{signal.snake_name} = {message.parent}_{message.snake_name}_{signal.snake_name}_decode(({signal.type_name}){signal.snake_name});'
